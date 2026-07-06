@@ -4,6 +4,11 @@
     <el-header class="app-header">
       <h1><el-icon :size="24"><FolderOpened /></el-icon> 标注进度预览</h1>
       <div class="header-right">
+        <template v-if="currentPlatform && user.role === 'admin'">
+          <el-button size="small" text @click="goPerformance" :type="view === 'performance' ? 'primary' : 'default'">
+            <el-icon><DataAnalysis /></el-icon> 绩效统计
+          </el-button>
+        </template>
         <template v-if="view === 'board' && user.role !== 'inspector'">
           <span class="location-label">{{ currentProject?.name }}</span>
           <el-upload :show-file-list="false" :before-upload="onUpload" accept=".csv">
@@ -33,7 +38,10 @@
     <div class="breadcrumb-bar">
       <a class="crumb-link" @click="goPlatforms">标注平台</a>
       <span v-if="currentPlatform" class="crumb-sep"> › </span>
-      <a v-if="currentPlatform" class="crumb-link" @click="goProjects">{{ currentPlatform.name }}</a>
+      <a v-if="currentPlatform && view !== 'projects'" class="crumb-link" @click="goProjects">{{ currentPlatform.name }}</a>
+      <span v-else-if="currentPlatform" class="crumb-current">{{ currentPlatform.name }}</span>
+      <span v-if="view === 'performance'" class="crumb-sep"> › </span>
+      <span v-if="view === 'performance'" class="crumb-current">绩效统计</span>
       <span v-if="currentProject" class="crumb-sep"> › </span>
       <span v-if="currentProject" class="crumb-current">{{ currentProject.name }}</span>
     </div>
@@ -55,6 +63,11 @@
         :platform-id="currentPlatform.id"
         :user="user"
       />
+      <PerformanceBoard
+        v-else-if="view === 'performance' && user.role === 'admin'"
+        :platform-id="currentPlatform.id"
+        :platform-name="currentPlatform?.name"
+      />
     </el-main>
     <UserManage ref="userManageRef" />
   </el-container>
@@ -63,12 +76,14 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { FolderOpened, User, ArrowDown, Upload, Setting, SwitchButton, DataAnalysis } from '@element-plus/icons-vue'
 import { fetchMe, uploadCsv } from './api/index.js'
 import Login from './views/Login.vue'
 import PlatformList from './components/PlatformList.vue'
 import ProjectList from './components/ProjectList.vue'
 import TaskBoard from './components/TaskBoard.vue'
 import UserManage from './components/UserManage.vue'
+import PerformanceBoard from './components/PerformanceBoard.vue'
 
 const user = ref(null)
 const view = ref('platforms')
@@ -106,6 +121,10 @@ function onSelectPlatform(p) {
 function onSelectProject(p) {
   currentProject.value = p
   view.value = 'board'
+}
+function goPerformance() {
+  view.value = 'performance'
+  currentProject.value = null
 }
 async function onUpload(file) {
   try {

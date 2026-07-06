@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, contains_eager
 from sqlalchemy import desc, or_
 
 from database import engine, Base, get_db, run_migrations, enable_wal
-from models import User, Platform, Project, Task, Item, Snapshot, SnapshotTask, StatusLog
+from models import User, Platform, Project, Task, Item, Snapshot, SnapshotTask, StatusLog, DailyPerformance
 from platform_client import PlatformClient
 from scheduler import scheduler, schedule_platform, unschedule_platform
 from utils import hash_password, verify_password, create_token, decode_token
@@ -894,6 +894,133 @@ def get_stats(project_id: int = Query(...), user: User = Depends(get_current_use
         "exported": exported,
         "returned": returned,
     }
+
+
+
+# ── Daily Performance ──
+@app.get("/api/performance")
+def get_performance(
+    platform_id: int = Query(...),
+    project_id: int = Query(...),
+    date: str = Query(...),
+    _=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    records = db.query(DailyPerformance).filter(
+        DailyPerformance.platform_id == platform_id,
+        DailyPerformance.project_id == project_id,
+        DailyPerformance.date == date,
+    ).order_by(DailyPerformance.user_name).all()
+    return [r.to_dict() for r in records]
+
+
+@app.post("/api/performance/fetch")
+def fetch_performance(
+    body: dict,
+    _=Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    platform_id = body.get("platformId")
+    project_id = body.get("projectId")
+    date_str = body.get("date", "")
+
+    if not platform_id or not project_id or not date_str:
+        raise HTTPException(400, "缺少参数")
+
+    platform = db.query(Platform).filter(Platform.id == platform_id).first()
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not platform or not project:
+        raise HTTPException(404, "平台或项目不存在")
+    if not project.project_key:
+        raise HTTPException(400, "项目未配置 project_key")
+
+    # Calculate day parameter (enough to cover target date)
+    try:
+        target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        today = date.today()
+        days_ago = (today - target_date).days
+        if days_ago < 0:
+            raise HTTPException(400, "不能获取今天及以后的数据")
+        day_param = max(days_ago + 2, 7)  # generous range to ensure coverage
+        target_md = target_date.strftime("%m/%d")  # API returns MM/DD
+    except ValueError:
+        raise HTTPException(400, "日期格式错误，需 YYYY-MM-DD")
+
+    client = PlatformClient(platform.base_url, platform.access_key)
+    try:
+        work_types = [
+            (1, "label_num"),
+            (2, "review_num"),
+            (3, "quality_num"),
+            (4, "acceptance_num"),
+        ]
+        user_map = {}  # user_id -> {user_name, nickname, ...nums}
+
+        for wt, field_name in work_types:
+            items = client.get_performance(project.project_key, wt, day_param)
+            for u in items:
+                uid = u.get("user_id")
+                if not uid:
+                    continue
+                nald = u.get("new_add_list", {})
+                dates = nald.get("date", [])
+                nums = nald.get("new_add_num", [])
+                # Find index of target date
+                idx = -1
+                for i, d in enumerate(dates):
+                    if d == target_md:
+                        idx = i
+                        break
+                val = nums[idx] if idx >= 0 and idx < len(nums) else 0
+
+                if uid not in user_map:
+                    user_map[uid] = {
+                        "user_id": uid,
+                        "user_name": u.get("user_name", ""),
+                        "nickname": u.get("nickname", ""),
+                        "label_num": 0,
+                        "review_num": 0,
+                        "quality_num": 0,
+                        "acceptance_num": 0,
+                    }
+                user_map[uid][field_name] = val
+
+        # Upsert into DB
+        for uid, data in user_map.items():
+            existing = db.query(DailyPerformance).filter(
+                DailyPerformance.project_key == project.project_key,
+                DailyPerformance.date == date_str,
+                DailyPerformance.user_id == uid,
+            ).first()
+            if existing:
+                existing.label_num = data["label_num"]
+                existing.review_num = data["review_num"]
+                existing.quality_num = data["quality_num"]
+                existing.acceptance_num = data["acceptance_num"]
+                existing.user_name = data["user_name"]
+                existing.nickname = data["nickname"]
+            else:
+                db.add(DailyPerformance(
+                    platform_id=platform_id,
+                    project_id=project_id,
+                    project_key=project.project_key,
+                    date=date_str,
+                    user_id=uid,
+                    user_name=data["user_name"],
+                    nickname=data["nickname"],
+                    label_num=data["label_num"],
+                    review_num=data["review_num"],
+                    quality_num=data["quality_num"],
+                    acceptance_num=data["acceptance_num"],
+                ))
+        db.commit()
+
+        return {
+            "message": f"拉取完成，共 {len(user_map)} 名用户",
+            "count": len(user_map),
+        }
+    finally:
+        client.close()
 
 
 # ── Export CSV ──

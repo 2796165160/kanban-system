@@ -93,5 +93,14 @@ class PlatformClient:
         """GET /v2/reports/{task_key}/check-info"""
         return self._request("GET", f"/v2/reports/{task_key}/check-info")
 
+    def get_performance(self, project_key: str, work_type: int, day_param: int) -> list:
+        """GET /v2/performance/user/labels - user performance for a project + work_type"""
+        data = self._request(
+            "GET",
+            f"/v2/performance/user/labels"
+            f"?project_key={project_key}&work_type={work_type}&day={day_param}&gid=0",
+        )
+        return data.get("data", {}).get("items", [])
+
     def close(self):
         self._client.close()

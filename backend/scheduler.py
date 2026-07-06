@@ -4,9 +4,9 @@ scheduler = BackgroundScheduler()
 _fetch_jobs = {}  # platform_id -> job_id
 
 
-from datetime import datetime
+from datetime import datetime, date as date_type
 from database import SessionLocal
-from models import Platform, Project, Task, Item, Snapshot, SnapshotTask
+from models import Platform, Project, Task, Item, Snapshot, SnapshotTask, DailyPerformance
 from platform_client import PlatformClient
 
 
@@ -105,6 +105,76 @@ def run_fetch(platform_id: int):
                     _fetch_and_update_task(client, db, task)
 
                     db.commit()
+
+            # ── Fetch daily performance for each project ──
+            from datetime import timedelta
+            yesterday = date_type.today() - timedelta(days=1)
+            perf_date_str = yesterday.strftime("%Y-%m-%d")
+            perf_md = yesterday.strftime("%m/%d")
+
+            for project in projects:
+                if not project.project_key:
+                    continue
+                try:
+                    work_types = [
+                        (1, "label_num"), (2, "review_num"),
+                        (3, "quality_num"), (4, "acceptance_num"),
+                    ]
+                    user_map = {}
+                    for wt, field_name in work_types:
+                        items = client.get_performance(project.project_key, wt, 7)
+                        for u in items:
+                            uid = u.get("user_id")
+                            if not uid:
+                                continue
+                            nald = u.get("new_add_list", {})
+                            dates = nald.get("date", [])
+                            nums = nald.get("new_add_num", [])
+                            idx = -1
+                            for i, d in enumerate(dates):
+                                if d == perf_md:
+                                    idx = i
+                                    break
+                            val = nums[idx] if idx >= 0 and idx < len(nums) else 0
+                            if uid not in user_map:
+                                user_map[uid] = {
+                                    "user_id": uid,
+                                    "user_name": u.get("user_name", ""),
+                                    "nickname": u.get("nickname", ""),
+                                    "label_num": 0, "review_num": 0,
+                                    "quality_num": 0, "acceptance_num": 0,
+                                }
+                            user_map[uid][field_name] = val
+
+                    for uid, data in user_map.items():
+                        existing = db.query(DailyPerformance).filter(
+                            DailyPerformance.project_key == project.project_key,
+                            DailyPerformance.date == perf_date_str,
+                            DailyPerformance.user_id == uid,
+                        ).first()
+                        if existing:
+                            existing.label_num = data["label_num"]
+                            existing.review_num = data["review_num"]
+                            existing.quality_num = data["quality_num"]
+                            existing.acceptance_num = data["acceptance_num"]
+                        else:
+                            db.add(DailyPerformance(
+                                platform_id=p.id,
+                                project_id=project.id,
+                                project_key=project.project_key,
+                                date=perf_date_str,
+                                user_id=uid,
+                                user_name=data["user_name"],
+                                nickname=data["nickname"],
+                                label_num=data["label_num"],
+                                review_num=data["review_num"],
+                                quality_num=data["quality_num"],
+                                acceptance_num=data["acceptance_num"],
+                            ))
+                    db.commit()
+                except Exception:
+                    pass  # log and continue
+
         finally:
             client.close()
     finally:

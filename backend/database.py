@@ -57,6 +57,27 @@ def run_migrations():
     tcols = [c["name"] for c in inspector.get_columns("tasks")]
     if "task_key" not in tcols:
         conn.execute(text("ALTER TABLE tasks ADD COLUMN task_key VARCHAR(255) DEFAULT ''"))
+    # DailyPerformance table (created via Base.metadata, but ensure it exists)
+    if "daily_performances" not in inspector.get_table_names():
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS daily_performances (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                platform_id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                project_key VARCHAR(255) DEFAULT '',
+                date VARCHAR(20) NOT NULL,
+                user_id INTEGER NOT NULL,
+                user_name VARCHAR(255) DEFAULT '',
+                nickname VARCHAR(255) DEFAULT '',
+                label_num INTEGER DEFAULT 0,
+                review_num INTEGER DEFAULT 0,
+                quality_num INTEGER DEFAULT 0,
+                acceptance_num INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(project_key, date, user_id)
+            )
+        """))
     conn.commit()
     conn.close()
 

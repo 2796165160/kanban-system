@@ -170,3 +170,38 @@ class StatusLog(Base):
             "changedBy": self.changed_by,
             "changedAt": self.changed_at.isoformat() if self.changed_at else "",
         }
+
+
+class DailyPerformance(Base):
+    __tablename__ = "daily_performances"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    platform_id = Column(Integer, nullable=False)
+    project_id = Column(Integer, nullable=False)
+    project_key = Column(String(255), default="")
+    date = Column(String(20), nullable=False)
+    user_id = Column(Integer, nullable=False)
+    user_name = Column(String(255), default="")
+    nickname = Column(String(255), default="")
+    label_num = Column(Integer, default=0)
+    review_num = Column(Integer, default=0)
+    quality_num = Column(Integer, default=0)
+    acceptance_num = Column(Integer, default=0)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "platformId": self.platform_id,
+            "projectId": self.project_id,
+            "projectKey": self.project_key,
+            "date": self.date,
+            "userId": self.user_id,
+            "userName": self.user_name,
+            "nickname": self.nickname,
+            "labelNum": self.label_num,
+            "reviewNum": self.review_num,
+            "qualityNum": self.quality_num,
+            "acceptanceNum": self.acceptance_num,
+        }

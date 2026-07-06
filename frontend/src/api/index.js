@@ -98,3 +98,11 @@ export function getExportCsvUrl(projectId) {
   const t = localStorage.getItem('token')
   return `/api/export-csv?project_id=${projectId}&token=${t}`
 }
+
+export function getPerformance(platformId, projectId, date) {
+  return api.get('/performance', { params: { platform_id: platformId, project_id: projectId, date } })
+}
+
+export function fetchPerformance(data) {
+  return api.post('/performance/fetch', data)
+}
